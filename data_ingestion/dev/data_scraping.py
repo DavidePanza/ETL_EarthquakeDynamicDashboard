@@ -1,7 +1,8 @@
 import os
 import boto3
 import pandas as pd
-from io import BytesIO
+# from io import BytesIO # when using parquet
+from io import StringIO
 from datetime import datetime, timedelta
 
 def lambda_handler(event, context):
@@ -36,12 +37,15 @@ def lambda_handler(event, context):
     
     if not df.empty:
         print("Uploading data to S3...")
-        buffer = BytesIO()
-        df.to_parquet(buffer, index=False)
+        # buffer = BytesIO() # when using parquet
+        # df.to_parquet(buffer, index=False)
+        csv_buffer = StringIO()
+        df.to_csv(csv_buffer, index=False)
         s3_client.put_object(
             Bucket=bucket,
-            Key=f"data/raw/earthquake_{start_date}.parquet",
-            Body=buffer.getvalue()
+            Key=f"data/raw/earthquake_{start_date}.csv", # or .parquet
+            Body=csv_buffer.getvalue()
+            # Body=buffer.getvalue() # when using parquet
         )
         print(f"Successfully uploaded data for {start_date}")
     else:
