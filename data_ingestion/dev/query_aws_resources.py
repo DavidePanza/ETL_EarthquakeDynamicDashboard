@@ -1,138 +1,115 @@
-# create_s3_emr.py - Simple S3 + EMR setup
 import boto3
 import json
 import time
-from dotenv import load_dotenv
+import io
+import zipfile
 import os
 
-load_dotenv(dotenv_path='.env') 
+def create_query_aws_resources():
+    # Configuration
+    bucket_name = os.environ.get("S3_BUCKET")
+    region = os.environ.get("AWS_REGION")
 
-# Configuration
-aws_access_key = os.environ.get("AWS_ACCESS_KEY_ID")
-aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
-region = os.environ.get("AWS_REGION")
-bucket_name = os.environ.get("S3_BUCKET")
-cluster_name = os.environ.get("EMR_CLUSTER_NAME") 
-region = os.environ.get("AWS_REGION")
+    # ==============================
+    # Get IAM role for Lambda
+    # ==============================
 
+    iam = boto3.client("iam")
+    role_name = "LambdaEarthquakeRole"
 
-# ==============================
-# Create IAM role for Lambda
-# ==============================
-
-iam = boto3.client("iam")
-
-role_name = "LambdaEarthquakeRole"
-
-assume_role_policy = {
-    "Version": "2012-10-17",
-    "Statement": [{
-        "Effect": "Allow",
-        "Principal": {"Service": "lambda.amazonaws.com"},
-        "Action": "sts:AssumeRole"
-    }]
-}
-
-try:
-    role = iam.create_role(
-        RoleName=role_name,
-        AssumeRolePolicyDocument=json.dumps(assume_role_policy)
-    )
-except iam.exceptions.EntityAlreadyExistsException:
+    # Just get the existing role
     role = iam.get_role(RoleName=role_name)
+    role_arn = role['Role']['Arn']
+    print("Using existing role ARN:", role_arn)
 
-# Attach basic managed policies
-iam.attach_role_policy(RoleName=role_name, PolicyArn="arn:aws:iam::aws:policy/AmazonS3FullAccess")
-iam.attach_role_policy(RoleName=role_name, PolicyArn="arn:aws:iam::aws:policy/AmazonAthenaFullAccess")
-iam.attach_role_policy(RoleName=role_name, PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole")
+    # ==============================
+    # Setup Athena (one-time)
+    # ==============================
 
-# Wait for the role to propagate
-time.sleep(10)
+    def setup_athena():
+        athena = boto3.client("athena", region_name=region)
+        
+        # Create database
+        athena.start_query_execution(
+            QueryString="CREATE DATABASE IF NOT EXISTS earthquakes_db_dashboard",
+            ResultConfiguration={"OutputLocation": f"s3://{bucket_name}/athena-results/"}
+        )
+        
+        # Create table for CSV data
+        table_query = f"""
+        CREATE EXTERNAL TABLE IF NOT EXISTS earthquakes_db_dashboard.earthquake_data (
+            time STRING,
+            latitude DOUBLE,
+            longitude DOUBLE,
+            depth DOUBLE,
+            mag DOUBLE,
+            place STRING,
+            id STRING,
+            timestamps TIMESTAMP,
+            date DATE,
+            time_only TIME
+        )
+        ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
+        WITH SERDEPROPERTIES ('field.delim' = ',')
+        LOCATION 's3://{bucket_name}/data/raw/'
+        TBLPROPERTIES ('skip.header.line.count'='1')
+        """
+        
+        athena.start_query_execution(
+            QueryString=table_query,
+            ResultConfiguration={"OutputLocation": f"s3://{bucket_name}/athena-results/"}
+        )
 
-role_arn = role['Role']['Arn']
-print("Role ARN:", role_arn)
+    # Run Athena setup
+    setup_athena()
+    print("Athena database and table created")
 
+    # ==============================
+    # Create QueryLambda
+    # ==============================
 
-# ==============================
-# Setup Athena
-# ==============================
+    lambda_client = boto3.client("lambda", region_name=region)
+    query_lambda_name = "QueryEarthquakeData"
 
-athena = boto3.client("athena")
+    # Create a proper ZIP file
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        lambda_code = '''def lambda_handler(event, context):
+        return {"statusCode": 200, "body": "Hello World"}
+    '''
+        zip_file.writestr('index.py', lambda_code)
 
-db_name = "earthquakes_db"
-s3_results = f"s3://{bucket_name}/athena-results/"
+    zip_buffer.seek(0)
 
-# Create database
-athena.start_query_execution(
-    QueryString=f"CREATE DATABASE IF NOT EXISTS {db_name}",
-    ResultConfiguration={"OutputLocation": s3_results}
-)
+    try:
+        response = lambda_client.create_function(
+            FunctionName=query_lambda_name,
+            Runtime="python3.11",
+            Role=role_arn,
+            Handler="index.lambda_handler",
+            Code={"ZipFile": zip_buffer.read()},
+            Timeout=60
+        )
+        print("Query Lambda ARN:", response['FunctionArn'])
+    except lambda_client.exceptions.ResourceConflictException:
+        print(f"Lambda function {query_lambda_name} already exists")
 
-# Create table pointing to S3 JSON
-table_query = f"""
-CREATE EXTERNAL TABLE IF NOT EXISTS {db_name}.earthquake_data (
-    id INT,
-    mag DOUBLE,
-    lat DOUBLE,
-    lon DOUBLE
-)
-ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
-LOCATION 's3://{bucket_name}/'
-"""
-athena.start_query_execution(
-    QueryString=table_query,
-    ResultConfiguration={"OutputLocation": s3_results}
-)
+    # ==============================
+    # Enable QueryLambda Function URL
+    # ==============================
 
+    lambda_client = boto3.client("lambda", region_name=region)
+    query_lambda_name = "QueryEarthquakeData"
 
-# ==============================
-# Create QueryLambda
-# ==============================
-
-lambda_client = boto3.client("lambda")
-query_lambda_name = "QueryEarthquakeData"
-
-query_lambda_code = f"""
-import boto3
-import json
-athena = boto3.client('athena')
-bucket_name = '{bucket_name}'
-db_name = '{db_name}'
-
-def lambda_handler(event, context):
-    min_mag = event.get("min_mag", 4.0)
-    query = f"SELECT * FROM {{db_name}}.earthquake_data WHERE mag >= {{min_mag}}"
-    response = athena.start_query_execution(
-        QueryString=query,
-        ResultConfiguration={{"OutputLocation": f"s3://{{bucket_name}}/athena-results/"}}
-    )
-    return {{'QueryExecutionId': response['QueryExecutionId']}}
-"""
-
-response = lambda_client.create_function(
-    FunctionName=query_lambda_name,
-    Runtime="python3.11",
-    Role=role_arn,
-    Handler="index.lambda_handler",
-    Code={"ZipFile": bytes(query_lambda_code, 'utf-8')},
-    Timeout=60
-)
-
-print("Query Lambda ARN:", response['FunctionArn'])
-
-
-# ==============================
-# Enable QueryLambda Function URL
-# ==============================
-
-lambda_client = boto3.client("lambda")
-
-lambda_name = "QueryEarthquakeData"  # your query Lambda
-
-response = lambda_client.create_function_url_config(
-    FunctionName=lambda_name,
-    AuthType="NONE"  # Public endpoint; use "AWS_IAM" for secured access
-)
-
-function_url = response['FunctionUrl']
-print("Lambda Function URL:", function_url)
+    # Check if Function URL exists
+    try:
+        response = lambda_client.get_function_url_config(FunctionName=query_lambda_name)
+        function_url = response['FunctionUrl']
+        print("Function URL already exists:", function_url)
+    except lambda_client.exceptions.ResourceNotFoundException:
+        response = lambda_client.create_function_url_config(
+            FunctionName=query_lambda_name,
+            AuthType="NONE"
+        )
+        function_url = response['FunctionUrl']
+        print("Lambda Function URL created:", function_url)
