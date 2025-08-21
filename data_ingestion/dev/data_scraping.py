@@ -18,12 +18,11 @@ def lambda_handler(event, context):
     print(f"Loading earthquake data for {start_date}...")
     df_earthquake = pd.read_csv(url)
 
-    cols_to_keep = ['time', 'latitude', 'longitude', 'depth', 'mag', 'place', 'id']
+    cols_to_keep = ['time', 'latitude', 'longitude', 'depth', 'mag', 'place', 'id', 'timestamps', 'event_date', 'event_time']
     df = df_earthquake[cols_to_keep].dropna().round(3)
-
     df['timestamps'] = pd.to_datetime(df['time']).dt.round('s')
-    df['date'] = df['timestamps'].dt.date
-    df['time'] = df['timestamps'].dt.floor('s').dt.time
+    df['event_date'] = df['timestamps'].dt.strftime('%Y-%m-%d')   # renamed from 'date'
+    df['event_time'] = df['timestamps'].dt.strftime('%H:%M:%S')   # renamed from 'time', string format
     
     if not df.empty:
         print("Uploading data to S3...")

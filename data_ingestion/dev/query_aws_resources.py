@@ -30,11 +30,25 @@ def create_query_aws_resources():
         athena = boto3.client("athena", region_name=region)
         
         # Create database
-        athena.start_query_execution(
-            QueryString="CREATE DATABASE IF NOT EXISTS earthquakes_db_dashboard",
+        db_query = "CREATE DATABASE IF NOT EXISTS earthquakes_db_dashboard"
+        db_response = athena.start_query_execution(
+            QueryString=db_query,
             ResultConfiguration={"OutputLocation": f"s3://{bucket_name}/athena-results/"}
         )
-        
+        db_query_execution_id = db_response['QueryExecutionId']
+
+        # Wait for database creation to complete
+        while True:
+            status = athena.get_query_execution(QueryExecutionId=db_query_execution_id)
+            state = status['QueryExecution']['Status']['State']
+            if state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
+                break
+            time.sleep(2)
+
+        if state != 'SUCCEEDED':
+            raise Exception(f"Athena database creation failed: {status['QueryExecution']['Status']}")
+
+
         # Create table for CSV data
         table_query = f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS earthquakes_db_dashboard.earthquake_data (
@@ -46,8 +60,8 @@ def create_query_aws_resources():
             place STRING,
             id STRING,
             timestamps TIMESTAMP,
-            date DATE,
-            time_only TIME
+            event_date STRING,      -- renamed from "date"
+            event_time STRING       -- renamed from "time_only" and use STRING instead of TIME
         )
         ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
         WITH SERDEPROPERTIES ('field.delim' = ',')
@@ -55,10 +69,23 @@ def create_query_aws_resources():
         TBLPROPERTIES ('skip.header.line.count'='1')
         """
         
-        athena.start_query_execution(
+
+        table_response = athena.start_query_execution(
             QueryString=table_query,
             ResultConfiguration={"OutputLocation": f"s3://{bucket_name}/athena-results/"}
         )
+        table_query_execution_id = table_response['QueryExecutionId']
+
+        # Wait for table creation to complete
+        while True:
+            status = athena.get_query_execution(QueryExecutionId=table_query_execution_id)
+            state = status['QueryExecution']['Status']['State']
+            if state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
+                break
+            time.sleep(2)
+
+        if state != 'SUCCEEDED':
+            raise Exception(f"Athena table creation failed: {status['QueryExecution']['Status']}")
 
     # Run Athena setup
     setup_athena()
