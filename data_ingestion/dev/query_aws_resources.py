@@ -101,10 +101,11 @@ def create_query_aws_resources():
     # Create a proper ZIP file
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        lambda_code = '''def lambda_handler(event, context):
-        return {"statusCode": 200, "body": "Hello World"}
-    '''
-        zip_file.writestr('index.py', lambda_code)
+        # Add the main Python file
+        zip_file.write('query_data.py', 'query_data.py')
+        
+        # If you have any other files to include, add them here
+        # zip_file.write('other_file.py', 'other_file.py')
 
     zip_buffer.seek(0)
 
@@ -113,9 +114,9 @@ def create_query_aws_resources():
             FunctionName=query_lambda_name,
             Runtime="python3.11",
             Role=role_arn,
-            Handler="index.lambda_handler",
+            Handler="query_data.lambda_handler",
             Code={"ZipFile": zip_buffer.read()},
-            Timeout=60
+            Timeout=300,
         )
         print("Query Lambda ARN:", response['FunctionArn'])
     except lambda_client.exceptions.ResourceConflictException:
@@ -140,3 +141,18 @@ def create_query_aws_resources():
         )
         function_url = response['FunctionUrl']
         print("Lambda Function URL created:", function_url)
+
+    # ==============================
+    # Add public permission for Function URL
+    # ==============================
+    try:
+        lambda_client.add_permission(
+            FunctionName=query_lambda_name,
+            StatementId="FunctionURLAllowPublicAccess",
+            Action="lambda:InvokeFunctionUrl",
+            Principal="*",
+            FunctionUrlAuthType="NONE"
+        )
+        print("Public access granted for Lambda Function URL")
+    except lambda_client.exceptions.ResourceConflictException:
+        print("Permission already exists for Function URL")
