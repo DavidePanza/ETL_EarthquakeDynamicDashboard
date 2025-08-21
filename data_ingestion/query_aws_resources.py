@@ -52,21 +52,20 @@ def create_query_aws_resources():
         # Create table for CSV data
         table_query = f"""
         CREATE EXTERNAL TABLE IF NOT EXISTS earthquakes_db_dashboard.earthquake_data (
-            time STRING,
+            full_time STRING,      -- YYYY-MM-DD HH:MM:SS
+            event_date STRING,     -- YYYY-MM-DD  
+            event_time STRING,     -- HH:MM:SS
             latitude DOUBLE,
             longitude DOUBLE,
             depth DOUBLE,
             mag DOUBLE,
             place STRING,
-            id STRING,
-            timestamps TIMESTAMP,
-            event_date STRING,      -- renamed from "date"
-            event_time STRING       -- renamed from "time_only" and use STRING instead of TIME
+            id STRING
         )
         ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe'
         WITH SERDEPROPERTIES ('field.delim' = ',')
-        LOCATION 's3://{bucket_name}/data/raw/'
-        TBLPROPERTIES ('skip.header.line.count'='1')
+        LOCATION 's3://earthquake-data-dynamic-dashboard/data/raw/'
+        TBLPROPERTIES ('skip.header.line.count'='1');
         """
         
 

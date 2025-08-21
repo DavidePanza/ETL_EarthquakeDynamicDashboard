@@ -18,11 +18,16 @@ def lambda_handler(event, context):
     print(f"Loading earthquake data for {start_date}...")
     df_earthquake = pd.read_csv(url)
 
-    cols_to_keep = ['time', 'latitude', 'longitude', 'depth', 'mag', 'place', 'id', 'timestamps', 'event_date', 'event_time']
+    cols_to_keep = ['time', 'latitude', 'longitude', 'depth', 'mag', 'place', 'id']
     df = df_earthquake[cols_to_keep].dropna().round(3)
-    df['timestamps'] = pd.to_datetime(df['time']).dt.round('s')
-    df['event_date'] = df['timestamps'].dt.strftime('%Y-%m-%d')   # renamed from 'date'
-    df['event_time'] = df['timestamps'].dt.strftime('%H:%M:%S')   # renamed from 'time', string format
+    df['full_time'] = pd.to_datetime(df['time']).dt.strftime('%Y-%m-%d %H:%M:%S')  # Full datetime
+    df['event_date'] = pd.to_datetime(df['time']).dt.strftime('%Y-%m-%d')         # Date only
+    df['event_time'] = pd.to_datetime(df['time']).dt.strftime('%H:%M:%S')  
+    df.drop(columns=['time'], inplace=True)  # Drop the original 'time' column
+
+    # Reorder columns for better structure
+    column_order = ['full_time', 'event_date', 'event_time', 'latitude', 'longitude', 'depth', 'mag', 'place', 'id']
+    df = df[column_order]
     
     if not df.empty:
         print("Uploading data to S3...")
