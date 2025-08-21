@@ -4,6 +4,7 @@ python create_aws_resources.py --step ingestion
 # Invoke Lambda function (test ingestion)
 aws lambda invoke --function-name ProcessEarthquakeData --payload '{}' response.json
 
+
 # Create AWS resources for querying
 python create_aws_resources.py --step query
 
