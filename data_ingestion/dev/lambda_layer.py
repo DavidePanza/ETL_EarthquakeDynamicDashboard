@@ -1,4 +1,3 @@
-
 import boto3
 import subprocess
 import zipfile
@@ -12,24 +11,33 @@ def build_and_publish_layer():
     layer_dir = Path("python")
     if layer_dir.exists():
         shutil.rmtree(layer_dir)
-    layer_dir.mkdir(exist_ok=True)
     
+    # Use Docker
     subprocess.run([
-        "pip", "install", "pandas", "--only-binary=:all:", "-t", str(layer_dir)
+        "docker", "build", "-f", "Dockerfile.lambda-layer", "-t", "lambda-layer", "."
     ], check=True)
     
-    # Create properly structured ZIP for Lambda layer
+    container_id = subprocess.check_output([
+        "docker", "create", "lambda-layer"
+    ]).decode().strip()
+    
+    subprocess.run([
+        "docker", "cp", f"{container_id}:/var/task/python", "."
+    ], check=True)
+    
+    subprocess.run(["docker", "rm", container_id], check=True)
+    print("Docker build successful")
+    
+    # Create ZIP (your existing code)
     with zipfile.ZipFile("layer.zip", 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zipf:
-        for root, dirs, files in os.walk("python"):  # Start from python directory
+        for root, dirs, files in os.walk("python"):
             for file in files:
                 file_path = os.path.join(root, file)
-                # Keep the python/ prefix for Lambda layers
                 zipf.write(file_path, file_path)
     
-    # Check ZIP before upload
     print(f"Layer size: {os.path.getsize('layer.zip') / (1024*1024):.1f} MB")
 
-    # Upload layer
+    # Upload layer (your existing code)
     lambda_client = boto3.client('lambda', region_name=region)
     with open("layer.zip", 'rb') as f:
         response = lambda_client.publish_layer_version(
@@ -40,8 +48,16 @@ def build_and_publish_layer():
 
     print(f"Layer ARN: {response['LayerVersionArn']}")
 
-    # Save to .env file
-    with open('.env', 'a') as f:
+    # Update .env file (improved to avoid duplicates)
+    env_content = ""
+    if os.path.exists('.env'):
+        with open('.env', 'r') as f:
+            lines = f.readlines()
+        lines = [line for line in lines if not line.startswith('LAMBDA_LAYER_ARN_DATA_INGESTION=')]
+        env_content = ''.join(lines)
+    
+    with open('.env', 'w') as f:
+        f.write(env_content)
         f.write(f"LAMBDA_LAYER_ARN_DATA_INGESTION={response['LayerVersionArn']}\n")
 
     # Cleanup

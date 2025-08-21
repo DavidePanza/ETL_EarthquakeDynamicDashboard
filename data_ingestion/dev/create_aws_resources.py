@@ -11,10 +11,10 @@ def main(step):
     if step == "ingestion":
         print("Creating resources for data ingestion...")
         print("Building and publishing Lambda layer...")
-        build_and_publish_layer()
+        #build_and_publish_layer()
 
         # Reload environment variables
-        load_dotenv(dotenv_path='.env', override=True)  # load the layern_arn
+        #load_dotenv(dotenv_path='.env', override=True)  # load the layern_arn
 
         print("Creating S3 bucket and Lambda function...")
         create_data_ingestion_aws_resources()

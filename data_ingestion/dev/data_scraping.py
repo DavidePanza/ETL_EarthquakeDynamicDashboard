@@ -1,4 +1,3 @@
-import os
 import boto3
 import pandas as pd
 # from io import BytesIO # when using parquet
@@ -6,20 +5,11 @@ from io import StringIO
 from datetime import datetime, timedelta
 
 def lambda_handler(event, context):
-    aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-    aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-    region = os.getenv('AWS_REGION', 'us-east-1')
-    bucket = os.getenv('S3_BUCKET')
-    
-    s3_client = boto3.client(
-        's3',
-        aws_access_key_id=aws_access_key,
-        aws_secret_access_key=aws_secret_key,
-        region_name=region
-    )
- 
+    bucket = "earthquake-data-dynamic-dashboard"
+    s3_client = boto3.client('s3')
+
     end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')    
+    start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')  
     url = (
         f"https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv"
         f"&starttime={start_date}&endtime={end_date}&minmagnitude=2"
@@ -41,13 +31,18 @@ def lambda_handler(event, context):
         # df.to_parquet(buffer, index=False)
         csv_buffer = StringIO()
         df.to_csv(csv_buffer, index=False)
-        s3_client.put_object(
-            Bucket=bucket,
-            Key=f"data/raw/earthquake_{start_date}.csv", # or .parquet
-            Body=csv_buffer.getvalue()
-            # Body=buffer.getvalue() # when using parquet
-        )
-        print(f"Successfully uploaded data for {start_date}")
+        csv_data = csv_buffer.getvalue()
+    
+        if csv_data:
+            s3_client.put_object(
+                Bucket=bucket,
+                Key=f"data/raw/earthquake_{start_date}.csv",
+                Body=csv_data
+                # Body=buffer.getvalue() # when using parquet
+                )
+            print(f"Successfully uploaded data for {start_date}")
+        else:
+            print(f"Generated CSV is empty for {start_date}")
     else:
         print(f"No earthquake data for {start_date}")
 
