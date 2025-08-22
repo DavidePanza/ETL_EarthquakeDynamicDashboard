@@ -3,7 +3,7 @@ name: Process Earthquake Data
 on:
   schedule:
     # Run daily at 2 AM UTC
-    - cron: '0 2 * * *'
+    - cron: '17 2 * * *'
   workflow_dispatch: # Manual trigger
 
 jobs:
