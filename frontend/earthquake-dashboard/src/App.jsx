@@ -9,437 +9,213 @@ const EarthquakeApp = () => {
   const [error, setError] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [showTectonicPlates, setShowTectonicPlates] = useState(true);
+  const [showPlates, setShowPlates] = useState(true);
   const plotRef = useRef(null);
   const animationRef = useRef(null);
 
-  const fetchEarthquakeData = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError('');
     
     try {
       const response = await fetch(import.meta.env.VITE_API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          start_date: startDate,
-          end_date: endDate
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_date: startDate, end_date: endDate })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const responseData = await response.json();
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       
-      // Extract the data array from the response
-      const data = responseData.data || [];
-      
-      // Sort earthquakes by full_time to show them in chronological order
-      const sortedData = data.sort((a, b) => new Date(a.full_time) - new Date(b.full_time));
+      const data = await response.json();
+      const sortedData = (data.data || []).sort((a, b) => new Date(a.full_time) - new Date(b.full_time)); // (a,b) is needed as you deal with numbers
       setEarthquakeData(sortedData);
-      setCurrentIndex(0);
+      setCurrentIndex(0); // index of the first earthquake to display
       setIsPlaying(false);
-      
     } catch (err) {
-      setError(`Failed to fetch earthquake data: ${err.message}`);
-      console.error('Error fetching data:', err);
+      setError(`Failed to fetch data: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  const initializeMap = async () => {
+  const initMap = async () => {
     if (!plotRef.current) return;
 
-    const layout = {
-      title: {
-        text: 'Earthquake Animation - World Map with Tectonic Plates',
-        font: { size: 20 }
+    const traces = [
+      {
+        type: 'scattergeo',
+        mode: 'markers',
+        lat: [], lon: [], text: [],
+        marker: { size: [], color: 'red', opacity: 0.7, line: { color: 'darkred', width: 1 } },
+        name: 'Earthquakes'
       },
+      {
+        type: 'scattergeo',
+        mode: 'lines',
+        lat: [], lon: [],
+        line: { color: 'blue', width: 2, dash: 'dash' },
+        name: 'Tectonic Plates',
+        visible: showPlates
+      }
+    ];
+
+    const layout = {
+      title: 'Earthquake Animation - World Map',
       geo: {
         projection: { type: 'natural earth' },
-        showland: true,
-        landcolor: 'lightgray',
-        showocean: true,
-        oceancolor: 'lightblue',
-        showlakes: true,
-        lakecolor: 'lightblue',
-        coastlinecolor: 'gray',
-        showframe: false,
-        bgcolor: 'white'
+        showland: true, landcolor: 'lightgray',
+        showocean: true, oceancolor: 'lightblue',
+        coastlinecolor: 'gray', showframe: false
       },
-      margin: { t: 60, b: 40, l: 40, r: 40 },
       height: 600
     };
 
-    const earthquakeTrace = {
-      type: 'scattergeo',
-      mode: 'markers',
-      lat: [],
-      lon: [],
-      text: [],
-      marker: {
-        size: [],
-        color: 'red',
-        opacity: 0.7,
-        line: {
-          color: 'darkred',
-          width: 1
-        }
-      },
-      name: 'Earthquakes'
-    };
+    await Plotly.newPlot(plotRef.current, traces, layout, { responsive: true }); // { responsive: true } it ensures that the map resizes correctly
 
-    // Tectonic plates trace (initially empty)
-    const plateTrace = {
-      type: 'scattergeo',
-      mode: 'lines',
-      lat: [],
-      lon: [],
-      line: {
-        color: 'blue',
-        width: 2,
-        dash: 'dash'
-      },
-      showlegend: true,
-      name: 'Tectonic Plate Boundaries',
-      visible: showTectonicPlates
-    };
-
-    const traces = [earthquakeTrace, plateTrace];
-
-    await Plotly.newPlot(plotRef.current, traces, layout, {
-      responsive: true,
-      displayModeBar: true
-    });
-
-    // Load tectonic plates data if enabled
-    if (showTectonicPlates) {
-      await loadTectonicPlates();
-    }
+    if (showPlates) await loadPlates();
   };
 
-  const loadTectonicPlates = async () => {
+  const loadPlates = async () => {
     try {
-      // Using a simplified tectonic plates dataset
       const response = await fetch('https://raw.githubusercontent.com/fraxen/tectonicplates/master/GeoJSON/PB2002_boundaries.json');
       const plateData = await response.json();
       
-      const plateLats = [];
-      const plateLons = [];
+      const [lats, lons] = [[], []];
       
-      // Process GeoJSON features
       plateData.features.forEach(feature => {
+        const processCoords = (coords) => { // coords is an array of coordinates [[lon, lat], [lon, lat], ...]
+          coords.forEach(coord => { lons.push(coord[0]); lats.push(coord[1]); }); 
+          lons.push(null); lats.push(null); // After finishing one line (or segment), we push null to separate line segments in Plotly.
+                                            // In Plotly, arrays of coordinates with null values indicate a break in the line.
+        };
+        
         if (feature.geometry.type === 'LineString') {
-          // Add line coordinates
-          feature.geometry.coordinates.forEach(coord => {
-            plateLons.push(coord[0]);
-            plateLats.push(coord[1]);
-          });
-          // Add null to separate line segments
-          plateLons.push(null);
-          plateLats.push(null);
+          processCoords(feature.geometry.coordinates);
         } else if (feature.geometry.type === 'MultiLineString') {
-          // Handle multiple line strings
-          feature.geometry.coordinates.forEach(lineString => {
-            lineString.forEach(coord => {
-              plateLons.push(coord[0]);
-              plateLats.push(coord[1]);
-            });
-            // Add null to separate line segments
-            plateLons.push(null);
-            plateLats.push(null);
-          });
+          feature.geometry.coordinates.forEach(processCoords);
         }
       });
-      
-      // Update the tectonic plates trace
-      const update = {
-        lat: [plateLats],
-        lon: [plateLons]
-      };
-      
-      Plotly.restyle(plotRef.current, update, [1]);
-      
-    } catch (error) {
-      console.error('Failed to load tectonic plates data:', error);
-    }
-  };
 
-  const toggleTectonicPlates = async () => {
-    setShowTectonicPlates(!showTectonicPlates);
-    
-    if (plotRef.current) {
-      // Toggle visibility of tectonic plates trace
-      const update = {
-        visible: !showTectonicPlates
-      };
-      Plotly.restyle(plotRef.current, update, [1]);
-      
-      // Load plates data if turning on and not already loaded
-      if (!showTectonicPlates) {
-        const currentData = plotRef.current.data[1];
-        if (!currentData.lat || currentData.lat.length === 0) {
-          await loadTectonicPlates();
-        }
-      }
+      Plotly.restyle(plotRef.current, { lat: [lats], lon: [lons] }, [1]); //[1] tells Plotly to update the second trace (tectonic plates)
+    } catch (error) {
+      console.error('Failed to load plates:', error);
     }
   };
 
   const updateMap = (index) => {
     if (!plotRef.current || !earthquakeData.length) return;
 
-    const currentEarthquakes = earthquakeData.slice(0, index + 1);
-    
-    const lats = currentEarthquakes.map(eq => eq.latitude);
-    const lons = currentEarthquakes.map(eq => eq.longitude);
-    const sizes = currentEarthquakes.map(eq => Math.max(4, eq.mag * 3));
-    const texts = currentEarthquakes.map(eq => 
-      `Magnitude: ${eq.mag}<br>` +
-      `Location: ${eq.place}<br>` +
-      `Time: ${eq.full_time}<br>` +
-      `Depth: ${eq.depth} km`
-    );
-
+    const current = earthquakeData.slice(0, index + 1);
     const update = {
-      lat: [lats],
-      lon: [lons],
-      text: [texts],
-      'marker.size': [sizes]
+      lat: [current.map(eq => eq.latitude)], // Loops over an array and returns a new array with the results of the callback function (forEach does not return a new element)
+      lon: [current.map(eq => eq.longitude)],
+      text: [current.map(eq => `Mag: ${eq.mag}<br>Location: ${eq.place}<br>Time: ${eq.full_time}<br>Depth: ${eq.depth} km`)],
+      'marker.size': [current.map(eq => Math.max(4, eq.mag * 3))]
     };
 
     Plotly.restyle(plotRef.current, update, [0]);
   };
 
-  const startAnimation = () => {
+  const animate = () => {
     if (!earthquakeData.length || isPlaying) return;
     
     setIsPlaying(true);
     setCurrentIndex(0);
     
-    const animate = () => {
-      setCurrentIndex(prevIndex => {
-        const nextIndex = prevIndex + 1;
-        
-        if (nextIndex >= earthquakeData.length) {
+    const step = () => {
+      setCurrentIndex(prev => {
+        const next = prev + 1;
+        if (next >= earthquakeData.length) {
           setIsPlaying(false);
-          return prevIndex;
+          return prev;
         }
-        
-        updateMap(nextIndex);
-        
-        if (nextIndex < earthquakeData.length - 1) {
-          animationRef.current = setTimeout(animate, 500);
+        updateMap(next);
+        if (next < earthquakeData.length - 1) {
+          animationRef.current = setTimeout(step, 500);
         } else {
           setIsPlaying(false);
         }
-        
-        return nextIndex;
+        return next;
       });
     };
-    
-    animate();
+    step();
   };
 
-  const stopAnimation = () => {
+  const stop = () => {
     setIsPlaying(false);
-    if (animationRef.current) {
-      clearTimeout(animationRef.current);
-    }
+    if (animationRef.current) clearTimeout(animationRef.current);
   };
 
-  const resetAnimation = () => {
-    stopAnimation();
+  const reset = () => {
+    stop();
     setCurrentIndex(0);
     updateMap(-1);
   };
 
-  useEffect(() => {
-    initializeMap();
-    
-    return () => {
-      if (animationRef.current) {
-        clearTimeout(animationRef.current);
+  const togglePlates = () => {
+    setShowPlates(!showPlates);
+    if (plotRef.current) {
+      Plotly.restyle(plotRef.current, { visible: !showPlates }, [1]);
+      if (!showPlates && (!plotRef.current.data[1].lat || plotRef.current.data[1].lat.length === 0)) {
+        loadPlates();
       }
-    };
+    }
+  };
+
+  useEffect(() => {
+    initMap();
+    return () => animationRef.current && clearTimeout(animationRef.current);
   }, []);
 
   useEffect(() => {
-    if (earthquakeData.length > 0 && !isPlaying) {
-      updateMap(currentIndex);
-    }
+    if (earthquakeData.length > 0 && !isPlaying) updateMap(currentIndex);
   }, [earthquakeData, currentIndex]);
 
-  const containerStyle = {
-    minHeight: '100vh',
-    backgroundColor: '#f5f5f5',
-    padding: '20px',
-    fontFamily: 'Arial, sans-serif'
-  };
-
-  const cardStyle = {
-    backgroundColor: 'white',
-    padding: '20px',
-    borderRadius: '8px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    marginBottom: '20px',
-    maxWidth: '1200px',
-    margin: '0 auto 20px auto'
-  };
-
-  const inputStyle = {
-    padding: '8px 12px',
-    border: '1px solid #ddd',
-    borderRadius: '4px',
-    marginRight: '10px',
-    marginBottom: '10px'
-  };
-
-  const buttonStyle = {
-    padding: '8px 16px',
-    border: 'none',
-    borderRadius: '4px',
-    cursor: 'pointer',
-    marginRight: '10px',
-    marginBottom: '10px'
-  };
-
-  const primaryButtonStyle = {
-    ...buttonStyle,
-    backgroundColor: '#007bff',
-    color: 'white'
-  };
-
-  const successButtonStyle = {
-    ...buttonStyle,
-    backgroundColor: '#28a745',
-    color: 'white'
-  };
-
-  const dangerButtonStyle = {
-    ...buttonStyle,
-    backgroundColor: '#dc3545',
-    color: 'white'
-  };
-
-  const secondaryButtonStyle = {
-    ...buttonStyle,
-    backgroundColor: '#6c757d',
-    color: 'white'
+  const styles = {
+    container: { minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '20px', fontFamily: 'Arial, sans-serif' },
+    card: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '20px', maxWidth: '1200px', margin: '0 auto 20px auto' },
+    input: { padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', marginRight: '10px' },
+    btn: { padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '10px', color: 'white' },
+    error: { marginTop: '15px', padding: '10px', backgroundColor: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb', borderRadius: '4px' }
   };
 
   return (
-    <div style={containerStyle}>
-      <h1 style={{textAlign: 'center', color: '#333', marginBottom: '30px'}}>
-        Earthquake Visualization Dashboard
-      </h1>
+    <div style={styles.container}>
+      <h1 style={{textAlign: 'center', color: '#333', marginBottom: '30px'}}>Earthquake Visualization</h1>
       
-      <div style={cardStyle}>
-        <h2 style={{color: '#555', marginBottom: '15px'}}>Select Date Range</h2>
-        <div>
-          <label style={{marginRight: '10px'}}>Start Date: </label>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            style={inputStyle}
-          />
-          
-          <label style={{marginRight: '10px'}}>End Date: </label>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            style={inputStyle}
-          />
-          
-          <button
-            onClick={fetchEarthquakeData}
-            disabled={loading}
-            style={primaryButtonStyle}
-          >
-            {loading ? 'Loading...' : 'Fetch Data'}
-          </button>
-        </div>
-        
-        {error && (
-          <div style={{
-            marginTop: '15px',
-            padding: '10px',
-            backgroundColor: '#f8d7da',
-            color: '#721c24',
-            border: '1px solid #f5c6cb',
-            borderRadius: '4px'
-          }}>
-            {error}
-          </div>
-        )}
+      <div style={styles.card}>
+        <h2>Date Range</h2>
+        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={styles.input} />
+        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={styles.input} />
+        <button onClick={fetchData} disabled={loading} style={{...styles.btn, backgroundColor: '#007bff'}}>
+          {loading ? 'Loading...' : 'Fetch Data'}
+        </button>
+        {error && <div style={styles.error}>{error}</div>}
       </div>
 
       {earthquakeData.length > 0 && (
-        <div style={cardStyle}>
-          <h3 style={{color: '#555', marginBottom: '15px'}}>
-            Animation Controls ({earthquakeData.length} earthquakes)
-          </h3>
-          <div>
-            <button
-              onClick={startAnimation}
-              disabled={isPlaying}
-              style={isPlaying ? {...successButtonStyle, opacity: 0.6} : successButtonStyle}
-            >
-              {isPlaying ? 'Playing...' : 'Start Animation'}
-            </button>
-            
-            <button
-              onClick={stopAnimation}
-              disabled={!isPlaying}
-              style={!isPlaying ? {...dangerButtonStyle, opacity: 0.6} : dangerButtonStyle}
-            >
-              Stop
-            </button>
-            
-            <button
-              onClick={resetAnimation}
-              disabled={isPlaying}
-              style={isPlaying ? {...secondaryButtonStyle, opacity: 0.6} : secondaryButtonStyle}
-            >
-              Reset
-            </button>
-            
-            <button
-              onClick={toggleTectonicPlates}
-              style={{
-                ...buttonStyle,
-                backgroundColor: showTectonicPlates ? '#17a2b8' : '#6c757d',
-                color: 'white'
-              }}
-            >
-              {showTectonicPlates ? 'Hide' : 'Show'} Tectonic Plates
-            </button>
-          </div>
-          
+        <div style={styles.card}>
+          <h3>Controls ({earthquakeData.length} earthquakes)</h3>
+          <button onClick={animate} disabled={isPlaying} style={{...styles.btn, backgroundColor: '#28a745', opacity: isPlaying ? 0.6 : 1}}>
+            {isPlaying ? 'Playing...' : 'Start'}
+          </button>
+          <button onClick={stop} disabled={!isPlaying} style={{...styles.btn, backgroundColor: '#dc3545', opacity: !isPlaying ? 0.6 : 1}}>
+            Stop
+          </button>
+          <button onClick={reset} disabled={isPlaying} style={{...styles.btn, backgroundColor: '#6c757d', opacity: isPlaying ? 0.6 : 1}}>
+            Reset
+          </button>
+          <button onClick={togglePlates} style={{...styles.btn, backgroundColor: showPlates ? '#17a2b8' : '#6c757d'}}>
+            {showPlates ? 'Hide' : 'Show'} Plates
+          </button>
           <div style={{marginTop: '10px', fontSize: '14px', color: '#666'}}>
-            Showing: {Math.min(currentIndex + 1, earthquakeData.length)} / {earthquakeData.length} earthquakes
+            Showing: {Math.min(currentIndex + 1, earthquakeData.length)} / {earthquakeData.length}
           </div>
         </div>
       )}
 
-      <div style={cardStyle}>
+      <div style={styles.card}>
         <div ref={plotRef} style={{width: '100%'}}></div>
-      </div>
-
-      <div style={cardStyle}>
-        <h3 style={{color: '#555', marginBottom: '10px'}}>Legend</h3>
-        <p style={{fontSize: '14px', color: '#666', margin: 0}}>
-          • <span style={{color: 'red'}}>Red circles</span>: Earthquakes (size = magnitude)<br/>
-          • <span style={{color: 'blue'}}>Blue dashed lines</span>: Tectonic plate boundaries<br/>
-          • Earthquakes appear chronologically during animation<br/>
-          • Hover over markers to see detailed information
-        </p>
       </div>
     </div>
   );
