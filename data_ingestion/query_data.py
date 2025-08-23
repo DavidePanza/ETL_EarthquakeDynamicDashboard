@@ -15,8 +15,25 @@ REGION = "us-east-1"
 athena = boto3.client('athena', region_name=REGION)
 
 def lambda_handler(event, context):
+    # CORS headers for all responses
+    cors_headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS"
+    }
+    
     try:
         logger.info(f"Received event: {json.dumps(event)}")
+        
+        # Handle preflight OPTIONS request
+        http_method = event.get('requestContext', {}).get('http', {}).get('method')
+        if http_method == 'OPTIONS':
+            return {
+                "statusCode": 200,
+                "headers": cors_headers,
+                "body": ""
+            }
         
         # Lambda Function URL sends POST body as string inside 'body'
         try:
@@ -28,7 +45,7 @@ def lambda_handler(event, context):
             logger.error(f"JSON decode error: {str(e)}")
             return {
                 "statusCode": 400,
-                "headers": {"Content-Type": "application/json"},
+                "headers": cors_headers,
                 "body": json.dumps({"error": f"Invalid JSON: {str(e)}"})
             }
 
@@ -40,7 +57,7 @@ def lambda_handler(event, context):
         if not start_date or not end_date:
             return {
                 "statusCode": 400,
-                "headers": {"Content-Type": "application/json"},
+                "headers": cors_headers,
                 "body": json.dumps({"error": "start_date and end_date required"})
             }
 
@@ -80,7 +97,7 @@ def lambda_handler(event, context):
         if wait_time >= max_wait_time:
             return {
                 "statusCode": 500,
-                "headers": {"Content-Type": "application/json"},
+                "headers": cors_headers,
                 "body": json.dumps({"error": "Query timeout"})
             }
 
@@ -89,7 +106,7 @@ def lambda_handler(event, context):
             logger.error(f"Athena query failed: {error_info}")
             return {
                 "statusCode": 500,
-                "headers": {"Content-Type": "application/json"},
+                "headers": cors_headers,
                 "body": json.dumps({
                     "error": f"Athena query failed: {state}",
                     "details": error_info.get('StateChangeReason', 'No additional details')
@@ -113,12 +130,7 @@ def lambda_handler(event, context):
         
         return {
             "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "POST, OPTIONS"
-            },
+            "headers": cors_headers,
             "body": json.dumps({
                 "data": rows,
                 "count": len(rows),
@@ -130,6 +142,6 @@ def lambda_handler(event, context):
         logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         return {
             "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
+            "headers": cors_headers,
             "body": json.dumps({"error": f"Internal server error: {str(e)}"})
         }
