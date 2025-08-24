@@ -84,9 +84,13 @@ const EarthquakeApp = () => {
       
       plateData.features.forEach(feature => {
         const processCoords = (coords) => { // coords is an array of coordinates [[lon, lat], [lon, lat], ...]
-          coords.forEach(coord => { lons.push(coord[0]); lats.push(coord[1]); }); 
-          lons.push(null); lats.push(null); // After finishing one line (or segment), we push null to separate line segments in Plotly.
-                                            // In Plotly, arrays of coordinates with null values indicate a break in the line.
+          coords.forEach(coord => {
+            lons.push(coord[0]);
+            lats.push(coord[1]);
+          });
+          lons.push(null);
+          lats.push(null); // After finishing one line (or segment), we push null to separate line segments in Plotly.
+                           // In Plotly, arrays of coordinates with null values indicate a break in the line.
         };
         
         if (feature.geometry.type === 'LineString') {
@@ -121,24 +125,25 @@ const EarthquakeApp = () => {
     
     setIsPlaying(true);
     setCurrentIndex(0);
+
     
     const step = () => {
-      setCurrentIndex(prev => {
-        const next = prev + 1;
+      setCurrentIndex(prev => { // First prev → parameter name of the function. Second prev → used inside the function body to calculate the new state.
+        const next = prev + 1;  // prev => prev +1 is like a python lambda function
         if (next >= earthquakeData.length) {
           setIsPlaying(false);
-          return prev;
+          return prev; // Returning prev keeps currentIndex at the last valid earthquake.
         }
         updateMap(next);
         if (next < earthquakeData.length - 1) {
-          animationRef.current = setTimeout(step, 500);
+          animationRef.current = setTimeout(step, 500); // this defines the speed of the animation. It also stores the timer ID in animationRef.current so we can cancel it later (with Stop)
         } else {
           setIsPlaying(false);
         }
         return next;
       });
     };
-    step();
+    step(); // Start the animation
   };
 
   const stop = () => {
@@ -155,7 +160,7 @@ const EarthquakeApp = () => {
   const togglePlates = () => {
     setShowPlates(!showPlates);
     if (plotRef.current) {
-      Plotly.restyle(plotRef.current, { visible: !showPlates }, [1]);
+      Plotly.restyle(plotRef.current, { visible: !showPlates }, [1]); // visible: it shows or hide the tectonic plates
       if (!showPlates && (!plotRef.current.data[1].lat || plotRef.current.data[1].lat.length === 0)) {
         loadPlates();
       }
@@ -165,9 +170,9 @@ const EarthquakeApp = () => {
   useEffect(() => {
     initMap();
     return () => animationRef.current && clearTimeout(animationRef.current);
-  }, []);
+  }, []); // Initialize map and clear animation on unmount
 
-  useEffect(() => {
+  useEffect(() => { // shows the first earthquake on the map
     if (earthquakeData.length > 0 && !isPlaying) updateMap(currentIndex);
   }, [earthquakeData, currentIndex]);
 
@@ -215,7 +220,7 @@ const EarthquakeApp = () => {
       )}
 
       <div style={styles.card}>
-        <div ref={plotRef} style={{width: '100%'}}></div>
+        <div ref={plotRef} style={{width: '100%'}}></div> {/* If you want React to "store" a DOM element inside a ref, you must attach it with the ref attribute. */}
       </div>
     </div>
   );
