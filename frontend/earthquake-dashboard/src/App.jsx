@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Plotly from 'plotly.js-dist';
 
 const EarthquakeApp = () => {
-  const [startDate, setStartDate] = useState('2025-08-17');
+  const [startDate, setStartDate] = useState('2025-08-20');
   const [endDate, setEndDate] = useState('2025-08-21');
   const [earthquakeData, setEarthquakeData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -10,6 +10,7 @@ const EarthquakeApp = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showPlates, setShowPlates] = useState(true);
+  const [animationSpeed, setAnimationSpeed] = useState(1); // 1x, 2x, 4x, 8x
   const plotRef = useRef(null);
   const animationRef = useRef(null);
 
@@ -60,17 +61,28 @@ const EarthquakeApp = () => {
     ];
 
     const layout = {
-      title: 'Earthquake Animation - World Map',
+      title: {
+        text: 'Earthquake Animation - World Map',
+        font: { size: 18, color: '#333' },
+        x: 0.5
+      },
       geo: {
         projection: { type: 'natural earth' },
         showland: true, landcolor: 'lightgray',
         showocean: true, oceancolor: 'lightblue',
         coastlinecolor: 'gray', showframe: false
       },
-      height: 600
+      height: 600,
+      margin: { l: 40, r: 40, t: 60, b: 40 },
+      showlegend: true,
+      legend: {
+        x: 0,
+        y: 1.2,
+        bgcolor: 'rgba(255,255,255,0.9)',
+      }
     };
 
-    await Plotly.newPlot(plotRef.current, traces, layout, { responsive: true }); // { responsive: true } it ensures that the map resizes correctly
+    await Plotly.newPlot(plotRef.current, traces, layout, { responsive: true, displayModeBar: true, modeBarButtonsToRemove: ['pan2d', 'select2d', 'lasso2d', 'autoScale2d'] }); // { responsive: true } it ensures that the map resizes correctly
 
     if (showPlates) await loadPlates();
   };
@@ -122,33 +134,18 @@ const EarthquakeApp = () => {
 
   const animate = () => {
     if (!earthquakeData.length || isPlaying) return;
-    
     setIsPlaying(true);
     setCurrentIndex(0);
-
-    
-    const step = () => {
-      setCurrentIndex(prev => { // First prev → parameter name of the function. Second prev → used inside the function body to calculate the new state.
-        const next = prev + 1;  // prev => prev +1 is like a python lambda function
-        if (next >= earthquakeData.length) {
-          setIsPlaying(false);
-          return prev; // Returning prev keeps currentIndex at the last valid earthquake.
-        }
-        updateMap(next);
-        if (next < earthquakeData.length - 1) {
-          animationRef.current = setTimeout(step, 500); // this defines the speed of the animation. It also stores the timer ID in animationRef.current so we can cancel it later (with Stop)
-        } else {
-          setIsPlaying(false);
-        }
-        return next;
-      });
-    };
-    step(); // Start the animation
   };
 
   const stop = () => {
     setIsPlaying(false);
-    if (animationRef.current) clearTimeout(animationRef.current);
+    if (animationRef.current) {
+      clearTimeout(animationRef.current);
+      animationRef.current = null;
+    }
+    // Update map to show only earthquakes up to current index
+    updateMap(currentIndex);
   };
 
   const reset = () => {
@@ -176,50 +173,231 @@ const EarthquakeApp = () => {
     if (earthquakeData.length > 0 && !isPlaying) updateMap(currentIndex);
   }, [earthquakeData, currentIndex]);
 
+  useEffect(() => {
+    if (isPlaying && currentIndex < earthquakeData.length) {
+      // Group earthquakes by hour
+      const currentTime = new Date(earthquakeData[currentIndex]?.full_time);
+      const currentHour = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), currentTime.getHours());
+      
+      // Find all earthquakes in the same hour
+      let nextIndex = currentIndex;
+      while (nextIndex < earthquakeData.length) {
+        const eqTime = new Date(earthquakeData[nextIndex].full_time);
+        const eqHour = new Date(eqTime.getFullYear(), eqTime.getMonth(), eqTime.getDate(), eqTime.getHours());
+        
+        if (eqHour.getTime() === currentHour.getTime()) {
+          nextIndex++;
+        } else {
+          break;
+        }
+      }
+      
+      updateMap(nextIndex - 1);
+      
+      if (nextIndex < earthquakeData.length) {
+        animationRef.current = setTimeout(() => {
+          setCurrentIndex(nextIndex);
+        }, 500 / animationSpeed);
+      } else {
+        setIsPlaying(false);
+      }
+    }
+  }, [currentIndex, isPlaying, earthquakeData, animationSpeed]);
+
   const styles = {
-    container: { minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '20px', fontFamily: 'Arial, sans-serif' },
-    card: { backgroundColor: 'white', padding: '20px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', marginBottom: '20px', maxWidth: '1200px', margin: '0 auto 20px auto' },
-    input: { padding: '8px 12px', border: '1px solid #ddd', borderRadius: '4px', marginRight: '10px' },
-    btn: { padding: '8px 16px', border: 'none', borderRadius: '4px', cursor: 'pointer', marginRight: '10px', color: 'white' },
-    error: { marginTop: '15px', padding: '10px', backgroundColor: '#f8d7da', color: '#721c24', border: '1px solid #f5c6cb', borderRadius: '4px' }
+    container: { 
+      minHeight: '100vh', 
+      backgroundColor: '#f8f9fa', 
+      padding: '20px', 
+      font: 'Avenir sans-serif',
+      // fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' 
+    },
+    card: { 
+      backgroundColor: 'white', 
+      padding: '24px', 
+      borderRadius: '12px', 
+      boxShadow: '0 4px 6px rgba(0,0,0,0.1)', 
+      marginBottom: '24px', 
+      maxWidth: '1000px', 
+      margin: '0 auto 24px auto',
+      border: '1px solid #e9ecef'
+    },
+    plotCard: { 
+      backgroundColor: 'white', 
+      padding: '24px', 
+      borderRadius: '12px', 
+      boxShadow: '0 4px 6px rgba(0,0,0,0.1)', 
+      margin: '0 auto', 
+      maxWidth: '1000px',
+      border: '1px solid #e9ecef'
+    },
+    input: { 
+      padding: '10px 12px', 
+      border: '2px solid #e9ecef', 
+      borderRadius: '6px', 
+      marginRight: '12px',
+      fontSize: '14px',
+      transition: 'border-color 0.2s',
+      outline: 'none'
+    },
+    btn: { 
+      padding: '10px 18px', 
+      border: 'none', 
+      borderRadius: '6px', 
+      cursor: 'pointer', 
+      marginRight: '12px', 
+      color: 'white',
+      fontSize: '14px',
+      fontWeight: '500',
+      transition: 'all 0.2s',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+    },
+    error: { 
+      marginTop: '16px', 
+      padding: '12px 16px', 
+      backgroundColor: '#f8d7da', 
+      color: '#721c24', 
+      border: '1px solid #f5c6cb', 
+      borderRadius: '6px',
+      fontSize: '14px'
+    },
+    timeDisplay: {
+      backgroundColor: '#f8f9fa',
+      border: '2px solid #dee2e6',
+      padding: '12px 20px',
+      borderRadius: '8px',
+      fontSize: '16px',
+      fontWeight: '500',
+      color: '#495057',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+    }
   };
 
   return (
     <div style={styles.container}>
-      <h1 style={{textAlign: 'center', color: '#333', marginBottom: '30px'}}>Earthquake Visualization</h1>
+      <h1 style={{textAlign: 'center', color: '#2c3e50', marginBottom: '40px', fontSize: '2.5rem', fontWeight: '600'}}>
+        Earthquake Visualization
+      </h1>
       
       <div style={styles.card}>
-        <h2>Date Range</h2>
-        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={styles.input} />
-        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={styles.input} />
-        <button onClick={fetchData} disabled={loading} style={{...styles.btn, backgroundColor: '#007bff'}}>
-          {loading ? 'Loading...' : 'Fetch Data'}
-        </button>
+        <h2 style={{marginBottom: '20px', color: '#343a40', fontSize: '1.5rem'}}>Date Range</h2>
+        <div style={{display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px'}}>
+          <input 
+            type="date" 
+            value={startDate} 
+            onChange={(e) => setStartDate(e.target.value)} 
+            style={styles.input}
+          />
+          <input 
+            type="date" 
+            value={endDate} 
+            onChange={(e) => setEndDate(e.target.value)} 
+            style={styles.input}
+          />
+          <button 
+            onClick={fetchData} 
+            disabled={loading} 
+            style={{
+              ...styles.btn, 
+              backgroundColor: loading ? '#6c757d' : '#007bff',
+              transform: loading ? 'none' : 'translateY(-1px)',
+              cursor: loading ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {loading ? 'Loading...' : 'Fetch Data'}
+          </button>
+        </div>
         {error && <div style={styles.error}>{error}</div>}
       </div>
 
       {earthquakeData.length > 0 && (
         <div style={styles.card}>
-          <h3>Controls ({earthquakeData.length} earthquakes)</h3>
-          <button onClick={animate} disabled={isPlaying} style={{...styles.btn, backgroundColor: '#28a745', opacity: isPlaying ? 0.6 : 1}}>
-            {isPlaying ? 'Playing...' : 'Start'}
-          </button>
-          <button onClick={stop} disabled={!isPlaying} style={{...styles.btn, backgroundColor: '#dc3545', opacity: !isPlaying ? 0.6 : 1}}>
-            Stop
-          </button>
-          <button onClick={reset} disabled={isPlaying} style={{...styles.btn, backgroundColor: '#6c757d', opacity: isPlaying ? 0.6 : 1}}>
-            Reset
-          </button>
-          <button onClick={togglePlates} style={{...styles.btn, backgroundColor: showPlates ? '#17a2b8' : '#6c757d'}}>
-            {showPlates ? 'Hide' : 'Show'} Plates
-          </button>
-          <div style={{marginTop: '10px', fontSize: '14px', color: '#666'}}>
-            Showing: {Math.min(currentIndex + 1, earthquakeData.length)} / {earthquakeData.length}
+          <h2 style={{marginBottom: '20px', color: '#343a40', fontSize: '1.5rem'}}>
+            Controls
+          </h2>
+          <div style={{display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px'}}>
+            <button 
+              onClick={animate} 
+              disabled={isPlaying} 
+              style={{
+                ...styles.btn, 
+                backgroundColor: '#28a745', 
+                opacity: isPlaying ? 0.6 : 1,
+                cursor: isPlaying ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isPlaying ? 'Playing...' : 'Start'}
+            </button>
+            <button 
+              onClick={stop} 
+              disabled={!isPlaying} 
+              style={{
+                ...styles.btn, 
+                backgroundColor: '#dc3545', 
+                opacity: !isPlaying ? 0.6 : 1,
+                cursor: !isPlaying ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Stop
+            </button>
+            <button 
+              onClick={reset} 
+              disabled={isPlaying} 
+              style={{
+                ...styles.btn, 
+                backgroundColor: '#6c757d', 
+                opacity: isPlaying ? 0.6 : 1,
+                cursor: isPlaying ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Reset
+            </button>
+            <button 
+              onClick={togglePlates} 
+              style={{
+                ...styles.btn, 
+                backgroundColor: showPlates ? '#17a2b8' : '#6c757d'
+              }}
+            >
+              {showPlates ? 'Hide' : 'Show'} Plates
+            </button>
+            <button 
+              onClick={() => setAnimationSpeed(prev => prev >= 8 ? 1 : prev * 2)} 
+              style={{
+                ...styles.btn, 
+                backgroundColor: '#ffc107', 
+                color: '#212529'
+              }}
+            >
+              Speed: {animationSpeed}x
+            </button>
+          </div>
+          <div style={{fontSize: '14px', color: '#6c757d', fontWeight: '500'}}>
+            Showing: <span style={{fontWeight: 'bold', color: '#495057'}}>{Math.min(currentIndex + 1, 
+              earthquakeData.length)}</span> of <span style={{fontWeight: 'bold', color: '#495057'}}>{earthquakeData.length}</span>  earthquakes found
           </div>
         </div>
       )}
 
-      <div style={styles.card}>
+      <div style={styles.plotCard}>
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          marginBottom: '24px'
+        }}>
+          <div style={{ 
+            marginBottom: '12px', 
+            fontSize: '16px', 
+            fontWeight: '500', 
+            color: '#495057' 
+          }}>
+            Current Earthquake Time:
+          </div>
+          <div style={styles.timeDisplay}>
+            {earthquakeData[currentIndex]?.full_time || 'No data available'}
+          </div>
+        </div>
         <div ref={plotRef} style={{width: '100%'}}></div> {/* If you want React to "store" a DOM element inside a ref, you must attach it with the ref attribute. */}
       </div>
     </div>
