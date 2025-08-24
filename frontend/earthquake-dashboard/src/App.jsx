@@ -21,7 +21,9 @@ const EarthquakeApp = () => {
     try {
       const response = await fetch(import.meta.env.VITE_API_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json',
+                   'X-API-Key': import.meta.env.VITE_API_KEY  // Add this header
+                 },
         body: JSON.stringify({ start_date: startDate, end_date: endDate })
       });
 

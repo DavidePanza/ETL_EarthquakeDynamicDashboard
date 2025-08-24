@@ -27,7 +27,10 @@ def lambda_handler(event, context):
         logger.info(f"Received event: {json.dumps(event)}")
         
         # Handle preflight OPTIONS request
-        http_method = event.get('requestContext', {}).get('http', {}).get('method')
+        http_method = event.get('httpMethod')  # API Gateway format
+        if not http_method:
+            http_method = event.get('requestContext', {}).get('http', {}).get('method')  # Lambda URL format
+
         if http_method == 'OPTIONS':
             return {
                 "statusCode": 200,

@@ -121,37 +121,198 @@ def create_query_aws_resources():
     except lambda_client.exceptions.ResourceConflictException:
         print(f"Lambda function {query_lambda_name} already exists")
 
+    # This section is only relevant if you want to invoke the Lambda function via a URL (in this case I'll use <API Gateway>)
+    # # ==============================
+    # # Enable QueryLambda Function URL
+    # # ==============================
+
+    # lambda_client = boto3.client("lambda", region_name=region)
+    # query_lambda_name = "QueryEarthquakeData"
+
+    # # Check if Function URL exists
+    # try:
+    #     response = lambda_client.get_function_url_config(FunctionName=query_lambda_name)
+    #     function_url = response['FunctionUrl']
+    #     print("Function URL already exists:", function_url)
+    # except lambda_client.exceptions.ResourceNotFoundException:
+    #     response = lambda_client.create_function_url_config(
+    #         FunctionName=query_lambda_name,
+    #         AuthType="NONE"
+    #     )
+    #     function_url = response['FunctionUrl']
+    #     print("Lambda Function URL created:", function_url)
+
+    # # ==============================
+    # # Add public permission for Function URL
+    # # ==============================
+    # try:
+    #     lambda_client.add_permission(
+    #         FunctionName=query_lambda_name,
+    #         StatementId="FunctionURLAllowPublicAccess",
+    #         Action="lambda:InvokeFunctionUrl",
+    #         Principal="*",
+    #         FunctionUrlAuthType="NONE"
+    #     )
+    #     print("Public access granted for Lambda Function URL")
+    # except lambda_client.exceptions.ResourceConflictException:
+    #     print("Permission already exists for Function URL")
+
     # ==============================
-    # Enable QueryLambda Function URL
+    # Create API Gateway with rate limiting
     # ==============================
 
-    lambda_client = boto3.client("lambda", region_name=region)
-    query_lambda_name = "QueryEarthquakeData"
+    apigateway = boto3.client("apigateway", region_name=region)
 
-    # Check if Function URL exists
-    try:
-        response = lambda_client.get_function_url_config(FunctionName=query_lambda_name)
-        function_url = response['FunctionUrl']
-        print("Function URL already exists:", function_url)
-    except lambda_client.exceptions.ResourceNotFoundException:
-        response = lambda_client.create_function_url_config(
-            FunctionName=query_lambda_name,
-            AuthType="NONE"
-        )
-        function_url = response['FunctionUrl']
-        print("Lambda Function URL created:", function_url)
+    # Create REST API
+    api_response = apigateway.create_rest_api(
+        name="earthquake-data-api",
+        endpointConfiguration={'types': ['REGIONAL']}
+    )
+    api_id = api_response['id']
+    print(f"API Gateway created: {api_id}")
 
-    # ==============================
-    # Add public permission for Function URL
-    # ==============================
+    # Get root resource
+    resources = apigateway.get_resources(restApiId=api_id)
+    root_id = resources['items'][0]['id']
+
+    # Create resource
+    resource_response = apigateway.create_resource(
+        restApiId=api_id,
+        parentId=root_id,
+        pathPart='earthquake-data'
+    )
+    resource_id = resource_response['id']
+
+    # Create POST method
+    apigateway.put_method(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='POST',
+        authorizationType='NONE',
+        apiKeyRequired=True
+    )
+
+    # Create integration FIRST
+    lambda_arn = f"arn:aws:lambda:{region}:{boto3.client('sts').get_caller_identity()['Account']}:function:{query_lambda_name}"
+    integration_uri = f"arn:aws:apigateway:{region}:lambda:path/2015-03-31/functions/{lambda_arn}/invocations"
+
+    apigateway.put_integration(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='POST',
+        type='AWS_PROXY',
+        integrationHttpMethod='POST',
+        uri=integration_uri
+    )
+
+    # THEN add CORS responses
+    apigateway.put_method_response(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='POST',
+        statusCode='200',
+        responseParameters={
+            'method.response.header.Access-Control-Allow-Origin': False,
+            'method.response.header.Access-Control-Allow-Headers': False,
+            'method.response.header.Access-Control-Allow-Methods': False
+        }
+    )
+
+    apigateway.put_integration_response(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='POST',
+        statusCode='200',
+        responseParameters={
+            'method.response.header.Access-Control-Allow-Origin': "'*'",
+            'method.response.header.Access-Control-Allow-Headers': "'Content-Type,X-Api-Key'",
+            'method.response.header.Access-Control-Allow-Methods': "'POST,OPTIONS'"
+        }
+    )
+
+    # Create OPTIONS method for preflight
+    apigateway.put_method(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='OPTIONS',
+        authorizationType='NONE',
+        apiKeyRequired=False
+    )
+
+    apigateway.put_integration(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='OPTIONS',
+        type='MOCK',
+        requestTemplates={'application/json': '{"statusCode": 200}'}
+    )
+
+    apigateway.put_method_response(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='OPTIONS',
+        statusCode='200',
+        responseParameters={
+            'method.response.header.Access-Control-Allow-Origin': False,
+            'method.response.header.Access-Control-Allow-Headers': False,
+            'method.response.header.Access-Control-Allow-Methods': False
+        }
+    )
+
+    apigateway.put_integration_response(
+        restApiId=api_id,
+        resourceId=resource_id,
+        httpMethod='OPTIONS',
+        statusCode='200',
+        responseParameters={
+            'method.response.header.Access-Control-Allow-Origin': "'*'",
+            'method.response.header.Access-Control-Allow-Headers': "'Content-Type,X-Api-Key'",
+            'method.response.header.Access-Control-Allow-Methods': "'POST,OPTIONS'"
+        }
+    )
+
+    # Add Lambda permission
     try:
         lambda_client.add_permission(
             FunctionName=query_lambda_name,
-            StatementId="FunctionURLAllowPublicAccess",
-            Action="lambda:InvokeFunctionUrl",
-            Principal="*",
-            FunctionUrlAuthType="NONE"
+            StatementId='ApiGatewayInvoke',
+            Action='lambda:InvokeFunction',
+            Principal='apigateway.amazonaws.com',
+            SourceArn=f"arn:aws:execute-api:{region}:{boto3.client('sts').get_caller_identity()['Account']}:{api_id}/*/*"
         )
-        print("Public access granted for Lambda Function URL")
     except lambda_client.exceptions.ResourceConflictException:
-        print("Permission already exists for Function URL")
+        pass
+
+    # Deploy
+    deployment = apigateway.create_deployment(
+        restApiId=api_id,
+        stageName='prod'
+    )
+
+    # Create API key
+    api_key_response = apigateway.create_api_key(
+        name='earthquake-api-key',
+        enabled=True
+    )
+    api_key_id = api_key_response['id']
+
+    # Create usage plan with rate limiting
+    usage_plan = apigateway.create_usage_plan(
+        name='earthquake-usage-plan',
+        throttle={'rateLimit': 5, 'burstLimit': 10},
+        quota={'limit': 1000, 'period': 'DAY'},
+        apiStages=[{'apiId': api_id, 'stage': 'prod'}]
+    )
+
+    # Link API key to usage plan
+    apigateway.create_usage_plan_key(
+        usagePlanId=usage_plan['id'],
+        keyId=api_key_id,
+        keyType='API_KEY'
+    )
+
+    # Get API key value
+    api_key_value = apigateway.get_api_key(apiKey=api_key_id, includeValue=True)['value']
+
+    print(f"API URL: https://{api_id}.execute-api.{region}.amazonaws.com/prod/earthquake-data")
+    print(f"API Key: {api_key_value}")
