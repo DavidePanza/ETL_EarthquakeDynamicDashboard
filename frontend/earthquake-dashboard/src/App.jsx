@@ -278,7 +278,7 @@ const EarthquakeApp = () => {
   return (
     <div style={styles.container}>
       <h1 style={{textAlign: 'center', color: '#2c3e50', marginBottom: '40px', fontSize: '2.5rem', fontWeight: '600'}}>
-        Earthquake Visualization
+        Dynamic Earthquake Dashboard
       </h1>
       
       <div style={styles.card}>
