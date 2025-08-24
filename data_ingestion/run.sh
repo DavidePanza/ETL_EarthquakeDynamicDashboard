@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e  # exit immediately if any command fails
 
+# Load environment variables
+export $(grep -v '^#' .env | xargs)
+
 # Create AWS resources for ingestion
 python create_aws_resources.py --step ingestion
 
