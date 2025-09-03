@@ -4,9 +4,10 @@
 
 Earthquake Dynamic Dashboard is a React app that allows users to visualize earthquakes by displaying their geographical as well as temporal occurrence on a map of the world. 
 
-In this repo you can find the code to implement data ingestion and cleaning from https://earthquake.usgs.gov as well as to create the React-powered dashboard to display the earthquake data. 
+In this repo you can find the implementation of the data ingestion/cleaning ETL as well as the React-powered dashboard.
+Data are scraped from: from https://earthquake.usgs.gov
 
-This toy project intentionally aims at exploring options from AWS resources to create an ETL pipeline to carry out the data ingestion/processing.
+This toy project intentionally aims at exploring options from AWS resources to create an ETL pipeline for the data ingestion/processing.
 
 ## Try the App
 

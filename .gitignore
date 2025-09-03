@@ -6,3 +6,4 @@ infos.md
 trash/
 .DS_Store
 data_ingestion/aws_resources.tf
+*.jpeg
